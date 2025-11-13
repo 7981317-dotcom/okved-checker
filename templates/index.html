@@ -408,6 +408,18 @@
                     body: formData
                 });
 
+                // Проверяем, что ответ успешный
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                // Проверяем, что ответ - это JSON
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    const text = await response.text();
+                    throw new Error(`Сервер вернул не JSON: ${text.substring(0, 100)}`);
+                }
+
                 const data = await response.json();
 
                 // Скрываем индикаторы загрузки
