@@ -114,6 +114,34 @@
             display: none;
         }
 
+        .filter-box {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            font-size: 14px;
+            color: #333;
+            user-select: none;
+        }
+
+        .checkbox-container input[type="checkbox"] {
+            display: block;
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+            cursor: pointer;
+        }
+
+        .checkbox-container:hover {
+            color: #667eea;
+        }
+
         .file-name {
             margin-top: 15px;
             padding: 10px;
@@ -252,7 +280,7 @@
             {% endif %}
         {% endwith %}
 
-        <form method="POST" action="/upload" enctype="multipart/form-data" id="uploadForm">
+        <form method="POST" action="/upload" enctype="multipart/form-data" id="uploadForm" target="downloadFrame">
             <div class="upload-area" onclick="document.getElementById('fileInput').click()">
                 <div class="upload-icon">📊</div>
                 <div class="upload-text">Нажмите для выбора файла</div>
@@ -261,11 +289,21 @@
                 <div class="file-name" id="fileName"></div>
             </div>
 
+            <div class="filter-box">
+                <label class="checkbox-container">
+                    <input type="checkbox" name="filter_trade" id="filterTrade" value="1">
+                    <span class="checkmark"></span>
+                    Только организации с "торговля" в названии
+                </label>
+            </div>
+
             <button type="submit" id="submitBtn">Обработать файл</button>
 
             <div class="loader" id="loader"></div>
             <div class="processing" id="processingText">Обрабатываем файл, пожалуйста подождите...</div>
         </form>
+
+        <iframe name="downloadFrame" id="downloadFrame" style="display:none;"></iframe>
 
         <div class="stats">
             <h3>Возможности</h3>
@@ -326,6 +364,30 @@
             submitBtn.textContent = 'Обработка...';
             loader.style.display = 'block';
             processingText.style.display = 'block';
+
+            // Автоматически сбросить форму через 5 секунд после начала загрузки
+            setTimeout(function() {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Обработать файл';
+                loader.style.display = 'none';
+                processingText.style.display = 'none';
+
+                // Показать сообщение об успехе
+                const successMsg = document.createElement('div');
+                successMsg.className = 'alert alert-success';
+                successMsg.textContent = 'Файл успешно обработан и загружен!';
+                uploadForm.insertBefore(successMsg, uploadForm.firstChild);
+
+                // Убрать сообщение через 5 секунд
+                setTimeout(function() {
+                    successMsg.remove();
+                }, 5000);
+
+                // Очистить выбранный файл
+                fileInput.value = '';
+                fileName.style.display = 'none';
+                fileName.textContent = '';
+            }, 5000);
         });
     </script>
 </body>
