@@ -293,6 +293,7 @@
 
             <div class="loader" id="loader"></div>
             <div class="processing" id="processingText">Обрабатываем файл, пожалуйста подождите...</div>
+            <div class="processing" id="progressText" style="display: none; margin-top: 10px; font-weight: bold;"></div>
         </form>
 
         <div id="downloadSection" style="display: none; margin-top: 20px;">
@@ -323,10 +324,12 @@
         const submitBtn = document.getElementById('submitBtn');
         const loader = document.getElementById('loader');
         const processingText = document.getElementById('processingText');
+        const progressText = document.getElementById('progressText');
         const alertContainer = document.getElementById('alertContainer');
         const downloadSection = document.getElementById('downloadSection');
 
         let downloadUrl = '';
+        let progressInterval = null;
 
         fileInput.addEventListener('change', function(e) {
             if (e.target.files.length > 0) {
@@ -377,6 +380,58 @@
             }
         }
 
+        async function checkProgress(taskId) {
+            try {
+                const response = await fetch(`/progress/${taskId}`);
+                const data = await response.json();
+
+                if (data.status === 'processing') {
+                    // Обновляем прогресс
+                    progressText.textContent = `Обработано: ${data.current} / ${data.total} ИНН`;
+                    progressText.style.display = 'block';
+                } else if (data.status === 'completed') {
+                    // Завершено
+                    clearInterval(progressInterval);
+
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Обработать файл';
+                    loader.style.display = 'none';
+                    processingText.style.display = 'none';
+                    progressText.style.display = 'none';
+
+                    // Формируем сообщение с результатами
+                    let message = `Обработка завершена! Всего: ${data.total_records}, Успешно: ${data.success_count}`;
+                    if (data.filter_trade) {
+                        message += `, С фильтром "торговля": ${data.success_count}`;
+                    }
+
+                    showAlert(message, 'success');
+
+                    // Устанавливаем URL для скачивания
+                    downloadUrl = `/download/${data.output_file}`;
+                    downloadSection.style.display = 'block';
+
+                    // Очищаем выбранный файл
+                    fileInput.value = '';
+                    fileName.style.display = 'none';
+                    fileName.textContent = '';
+                } else if (data.status === 'error') {
+                    // Ошибка
+                    clearInterval(progressInterval);
+
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Обработать файл';
+                    loader.style.display = 'none';
+                    processingText.style.display = 'none';
+                    progressText.style.display = 'none';
+
+                    showAlert(`Ошибка: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error checking progress:', error);
+            }
+        }
+
         uploadForm.addEventListener('submit', async function(e) {
             e.preventDefault();
 
@@ -391,6 +446,7 @@
             submitBtn.textContent = 'Обработка...';
             loader.style.display = 'block';
             processingText.style.display = 'block';
+            progressText.style.display = 'none';
             alertContainer.innerHTML = '';
 
             // Подготавливаем данные формы
@@ -422,32 +478,14 @@
 
                 const data = await response.json();
 
-                // Скрываем индикаторы загрузки
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Обработать файл';
-                loader.style.display = 'none';
-                processingText.style.display = 'none';
-
-                if (data.success) {
-                    // Сохраняем URL для скачивания
-                    downloadUrl = data.download_url;
-
-                    // Формируем сообщение с результатами
-                    let message = `Обработка завершена! Всего: ${data.total}, Успешно: ${data.success_count}`;
-                    if (data.filter_trade) {
-                        message += `, С фильтром "торговля": ${data.success_count}`;
-                    }
-
-                    showAlert(message, 'success');
-
-                    // Показываем кнопку скачивания
-                    downloadSection.style.display = 'block';
-
-                    // Очищаем выбранный файл
-                    fileInput.value = '';
-                    fileName.style.display = 'none';
-                    fileName.textContent = '';
+                if (data.success && data.task_id) {
+                    // Запускаем проверку прогресса каждые 500мс
+                    progressInterval = setInterval(() => checkProgress(data.task_id), 500);
                 } else {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Обработать файл';
+                    loader.style.display = 'none';
+                    processingText.style.display = 'none';
                     showAlert(`Ошибка: ${data.error}`, 'error');
                 }
             } catch (error) {

@@ -9,11 +9,15 @@ import threading
 import os
 from werkzeug.utils import secure_filename
 import tempfile
+import uuid
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here-change-in-production'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = tempfile.gettempdir()
+
+# Глобальное хранилище прогресса
+progress_store = {}
 
 # ===== НАСТРОЙКИ DADATA =====
 API_KEYS = [
@@ -189,7 +193,7 @@ def get_okved_by_inn(inn, retry_count=0):
             'Результат': f'Ошибка: {str(e)[:50]}'
         }
 
-def process_file(input_path, filter_trade=False, max_workers=10):
+def process_file(input_path, filter_trade=False, max_workers=10, task_id=None):
     """Обрабатывает Excel файл с ИНН"""
     try:
         # Читаем Excel файл
@@ -209,13 +213,24 @@ def process_file(input_path, filter_trade=False, max_workers=10):
             inn_column = df.columns[0]
 
         inn_list = df[inn_column].dropna().tolist()
+        total_count = len(inn_list)
+
+        # Инициализируем прогресс
+        if task_id:
+            progress_store[task_id] = {
+                'current': 0,
+                'total': total_count,
+                'status': 'processing'
+            }
 
         results = []
+        completed_count = 0
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_inn = {executor.submit(get_okved_by_inn, inn): inn for inn in inn_list}
 
             for future in as_completed(future_to_inn):
+                completed_count += 1
                 try:
                     result = future.result()
                     results.append(result)
@@ -229,6 +244,14 @@ def process_file(input_path, filter_trade=False, max_workers=10):
                         'Статус_организации': '',
                         'Результат': f'Ошибка потока: {str(e)[:50]}'
                     })
+
+                # Обновляем прогресс каждые 100 записей или на последней
+                if task_id and (completed_count % 100 == 0 or completed_count == total_count):
+                    progress_store[task_id] = {
+                        'current': completed_count,
+                        'total': total_count,
+                        'status': 'processing'
+                    }
 
         results_df = pd.DataFrame(results)
 
@@ -244,14 +267,53 @@ def process_file(input_path, filter_trade=False, max_workers=10):
 
         results_df.to_excel(output_path, index=False, engine='openpyxl')
 
+        # Обновляем прогресс как завершенный
+        if task_id:
+            progress_store[task_id] = {
+                'current': total_count,
+                'total': total_count,
+                'status': 'completed',
+                'output_file': os.path.basename(output_path)
+            }
+
         return output_path, total_before_filter, len(results_df[results_df['Результат'] == 'Успешно'])
 
     except Exception as e:
+        if task_id:
+            progress_store[task_id] = {
+                'status': 'error',
+                'error': str(e)
+            }
         raise Exception(f"Ошибка обработки файла: {str(e)}")
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
+def process_file_async(input_path, filter_trade, task_id):
+    """Асинхронная обработка файла"""
+    try:
+        output_path, total, success = process_file(input_path, filter_trade=filter_trade, task_id=task_id)
+
+        # Удаляем входной файл
+        if os.path.exists(input_path):
+            os.remove(input_path)
+
+        # Сохраняем результаты в прогресс
+        if task_id in progress_store:
+            progress_store[task_id].update({
+                'total_records': total,
+                'success_count': success,
+                'filter_trade': filter_trade
+            })
+    except Exception as e:
+        if os.path.exists(input_path):
+            os.remove(input_path)
+        if task_id in progress_store:
+            progress_store[task_id] = {
+                'status': 'error',
+                'error': str(e)
+            }
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -272,29 +334,31 @@ def upload_file():
         # Получаем значение фильтра из формы
         filter_trade = request.form.get('filter_trade') == '1'
 
-        try:
-            output_path, total, success = process_file(input_path, filter_trade=filter_trade)
+        # Генерируем уникальный ID задачи
+        task_id = str(uuid.uuid4())
 
-            # Удаляем входной файл
-            os.remove(input_path)
+        # Запускаем обработку в отдельном потоке
+        thread = threading.Thread(
+            target=process_file_async,
+            args=(input_path, filter_trade, task_id)
+        )
+        thread.daemon = True
+        thread.start()
 
-            # Получаем только имя файла из пути
-            output_filename = os.path.basename(output_path)
-
-            return jsonify({
-                'success': True,
-                'download_url': f'/download/{output_filename}',
-                'total': total,
-                'success_count': success,
-                'filter_trade': filter_trade
-            })
-
-        except Exception as e:
-            if os.path.exists(input_path):
-                os.remove(input_path)
-            return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({
+            'success': True,
+            'task_id': task_id
+        })
     else:
         return jsonify({'success': False, 'error': 'Недопустимый формат файла. Используйте .xlsx или .xls'}), 400
+
+@app.route('/progress/<task_id>')
+def get_progress(task_id):
+    """Получает прогресс обработки"""
+    if task_id not in progress_store:
+        return jsonify({'error': 'Task not found'}), 404
+
+    return jsonify(progress_store[task_id])
 
 @app.route('/download/<filename>')
 def download_file(filename):
