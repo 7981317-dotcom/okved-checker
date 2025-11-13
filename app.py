@@ -189,7 +189,7 @@ def get_okved_by_inn(inn, retry_count=0):
             'Результат': f'Ошибка: {str(e)[:50]}'
         }
 
-def process_file(input_path, filter_trade=False, max_workers=10):
+def process_file(input_path, max_workers=10):
     """Обрабатывает Excel файл с ИНН"""
     try:
         # Читаем Excel файл
@@ -232,19 +232,13 @@ def process_file(input_path, filter_trade=False, max_workers=10):
 
         results_df = pd.DataFrame(results)
 
-        # Фильтрация по слову "торговля" если включен фильтр
-        total_before_filter = len(results)
-        if filter_trade:
-            # Фильтруем только те строки, где в названии есть слово "торговля" (независимо от регистра)
-            results_df = results_df[results_df['Название'].str.contains('торговл', case=False, na=False)]
-
         # Генерируем имя выходного файла
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = os.path.join(app.config['UPLOAD_FOLDER'], f"okved_results_{timestamp}.xlsx")
 
         results_df.to_excel(output_path, index=False, engine='openpyxl')
 
-        return output_path, total_before_filter, len(results_df[results_df['Результат'] == 'Успешно'])
+        return output_path, len(results), len(results_df[results_df['Результат'] == 'Успешно'])
 
     except Exception as e:
         raise Exception(f"Ошибка обработки файла: {str(e)}")
@@ -271,19 +265,13 @@ def upload_file():
         input_path = os.path.join(app.config['UPLOAD_FOLDER'], f"input_{timestamp}_{filename}")
         file.save(input_path)
 
-        # Получаем значение фильтра из формы
-        filter_trade = request.form.get('filter_trade') == '1'
-
         try:
-            output_path, total, success = process_file(input_path, filter_trade=filter_trade)
+            output_path, total, success = process_file(input_path)
 
             # Удаляем входной файл
             os.remove(input_path)
 
-            if filter_trade:
-                flash(f'Обработка завершена! Всего: {total}, Успешно: {success}, С фильтром "торговля": {success}', 'success')
-            else:
-                flash(f'Обработка завершена! Всего: {total}, Успешно: {success}', 'success')
+            flash(f'Обработка завершена! Всего: {total}, Успешно: {success}', 'success')
             return send_file(output_path, as_attachment=True, download_name='okved_results.xlsx')
 
         except Exception as e:
