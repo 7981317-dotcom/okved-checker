@@ -270,17 +270,9 @@
             </ul>
         </div>
 
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">
-                        {{ message }}
-                    </div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
+        <div id="alertContainer"></div>
 
-        <form method="POST" action="/upload" enctype="multipart/form-data" id="uploadForm" target="downloadFrame">
+        <form id="uploadForm">
             <div class="upload-area" onclick="document.getElementById('fileInput').click()">
                 <div class="upload-icon">📊</div>
                 <div class="upload-text">Нажмите для выбора файла</div>
@@ -303,7 +295,11 @@
             <div class="processing" id="processingText">Обрабатываем файл, пожалуйста подождите...</div>
         </form>
 
-        <iframe name="downloadFrame" id="downloadFrame" style="display:none;"></iframe>
+        <div id="downloadSection" style="display: none; margin-top: 20px;">
+            <button id="downloadBtn" onclick="downloadFile()" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%);">
+                📥 Скачать результат
+            </button>
+        </div>
 
         <div class="stats">
             <h3>Возможности</h3>
@@ -327,6 +323,10 @@
         const submitBtn = document.getElementById('submitBtn');
         const loader = document.getElementById('loader');
         const processingText = document.getElementById('processingText');
+        const alertContainer = document.getElementById('alertContainer');
+        const downloadSection = document.getElementById('downloadSection');
+
+        let downloadUrl = '';
 
         fileInput.addEventListener('change', function(e) {
             if (e.target.files.length > 0) {
@@ -359,35 +359,92 @@
             }
         });
 
-        uploadForm.addEventListener('submit', function() {
+        function showAlert(message, type) {
+            alertContainer.innerHTML = '';
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            alertContainer.appendChild(alert);
+
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        function downloadFile() {
+            if (downloadUrl) {
+                window.location.href = downloadUrl;
+            }
+        }
+
+        uploadForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showAlert('Пожалуйста, выберите файл', 'error');
+                return;
+            }
+
+            // Скрываем кнопку скачивания и показываем загрузку
+            downloadSection.style.display = 'none';
             submitBtn.disabled = true;
             submitBtn.textContent = 'Обработка...';
             loader.style.display = 'block';
             processingText.style.display = 'block';
+            alertContainer.innerHTML = '';
 
-            // Автоматически сбросить форму через 5 секунд после начала загрузки
-            setTimeout(function() {
+            // Подготавливаем данные формы
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            const filterTrade = document.getElementById('filterTrade');
+            if (filterTrade.checked) {
+                formData.append('filter_trade', '1');
+            }
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                // Скрываем индикаторы загрузки
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Обработать файл';
                 loader.style.display = 'none';
                 processingText.style.display = 'none';
 
-                // Показать сообщение об успехе
-                const successMsg = document.createElement('div');
-                successMsg.className = 'alert alert-success';
-                successMsg.textContent = 'Файл успешно обработан и загружен!';
-                uploadForm.insertBefore(successMsg, uploadForm.firstChild);
+                if (data.success) {
+                    // Сохраняем URL для скачивания
+                    downloadUrl = data.download_url;
 
-                // Убрать сообщение через 5 секунд
-                setTimeout(function() {
-                    successMsg.remove();
-                }, 5000);
+                    // Формируем сообщение с результатами
+                    let message = `Обработка завершена! Всего: ${data.total}, Успешно: ${data.success_count}`;
+                    if (data.filter_trade) {
+                        message += `, С фильтром "торговля": ${data.success_count}`;
+                    }
 
-                // Очистить выбранный файл
-                fileInput.value = '';
-                fileName.style.display = 'none';
-                fileName.textContent = '';
-            }, 5000);
+                    showAlert(message, 'success');
+
+                    // Показываем кнопку скачивания
+                    downloadSection.style.display = 'block';
+
+                    // Очищаем выбранный файл
+                    fileInput.value = '';
+                    fileName.style.display = 'none';
+                    fileName.textContent = '';
+                } else {
+                    showAlert(`Ошибка: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Обработать файл';
+                loader.style.display = 'none';
+                processingText.style.display = 'none';
+                showAlert(`Ошибка при обработке файла: ${error.message}`, 'error');
+            }
         });
     </script>
 </body>

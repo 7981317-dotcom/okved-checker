@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, send_file, flash, redirect, url_for
+from flask import Flask, render_template, request, send_file, flash, redirect, url_for, jsonify
 import pandas as pd
 import requests
 import json
@@ -256,14 +256,12 @@ def index():
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
-        flash('Файл не выбран', 'error')
-        return redirect(url_for('index'))
+        return jsonify({'success': False, 'error': 'Файл не выбран'}), 400
 
     file = request.files['file']
 
     if file.filename == '':
-        flash('Файл не выбран', 'error')
-        return redirect(url_for('index'))
+        return jsonify({'success': False, 'error': 'Файл не выбран'}), 400
 
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
@@ -280,20 +278,35 @@ def upload_file():
             # Удаляем входной файл
             os.remove(input_path)
 
-            if filter_trade:
-                flash(f'Обработка завершена! Всего: {total}, Успешно: {success}, С фильтром "торговля": {success}', 'success')
-            else:
-                flash(f'Обработка завершена! Всего: {total}, Успешно: {success}', 'success')
-            return send_file(output_path, as_attachment=True, download_name='okved_results.xlsx')
+            # Получаем только имя файла из пути
+            output_filename = os.path.basename(output_path)
+
+            return jsonify({
+                'success': True,
+                'download_url': f'/download/{output_filename}',
+                'total': total,
+                'success_count': success,
+                'filter_trade': filter_trade
+            })
 
         except Exception as e:
             if os.path.exists(input_path):
                 os.remove(input_path)
-            flash(f'Ошибка: {str(e)}', 'error')
-            return redirect(url_for('index'))
+            return jsonify({'success': False, 'error': str(e)}), 500
     else:
-        flash('Недопустимый формат файла. Используйте .xlsx или .xls', 'error')
-        return redirect(url_for('index'))
+        return jsonify({'success': False, 'error': 'Недопустимый формат файла. Используйте .xlsx или .xls'}), 400
+
+@app.route('/download/<filename>')
+def download_file(filename):
+    """Отдает файл для скачивания"""
+    try:
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        if os.path.exists(file_path):
+            return send_file(file_path, as_attachment=True, download_name='okved_results.xlsx')
+        else:
+            return jsonify({'error': 'Файл не найден'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
