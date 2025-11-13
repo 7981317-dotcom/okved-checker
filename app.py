@@ -235,8 +235,8 @@ def process_file(input_path, filter_trade=False, max_workers=10):
         # Фильтрация по слову "торговля" если включен фильтр
         total_before_filter = len(results)
         if filter_trade:
-            # Фильтруем только те строки, где в названии есть слово "торговля" (независимо от регистра)
-            results_df = results_df[results_df['Название'].str.contains('торговл', case=False, na=False)]
+            # Фильтруем только те строки, где в названии ОКВЭД есть слово "торговля" (независимо от регистра)
+            results_df = results_df[results_df['ОКВЭД_название'].str.contains('торговл', case=False, na=False)]
 
         # Генерируем имя выходного файла
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
